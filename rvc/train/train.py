@@ -580,10 +580,15 @@ def run(
                 ckpt = torch.load(pretrainG, map_location="cpu", weights_only=True)[
                     "model"
                 ]
+                # strict=False: our synthesizer carries extra modules
+                # (retrieval_v2.*) absent from stock pretrained -- those init
+                # fresh; everything else loads normally.
                 if hasattr(net_g, "module"):
-                    net_g.module.load_state_dict(ckpt)
+                    missing, unexpected = net_g.module.load_state_dict(ckpt, strict=False)
                 else:
-                    net_g.load_state_dict(ckpt)
+                    missing, unexpected = net_g.load_state_dict(ckpt, strict=False)
+                if missing:
+                    print(f"pretrained G: {len(missing)} keys init fresh (e.g. {missing[:2]})")
                 del ckpt
             except Exception as e:
                 print(
