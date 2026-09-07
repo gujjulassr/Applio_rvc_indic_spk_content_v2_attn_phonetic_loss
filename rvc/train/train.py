@@ -104,6 +104,15 @@ def _get_phon(device):
         print(f"[PCL] {pdir} | fragile ids {len(_phon_frag_ids)}/12 | "
               f"c_phon={c_phon} lam_frag={lam_frag} every={phon_every}", flush=True)
     return _phon_model, _phon_frag_ids
+
+
+def _phon_znorm(w):
+    """Differentiable per-sample zero-mean/unit-variance normalization,
+    matching Wav2Vec2FeatureExtractor(do_normalize=True) (population var,
+    eps 1e-7). Keeps gradients to the generated waveform."""
+    m = w.mean(dim=-1, keepdim=True)
+    v = w.var(dim=-1, keepdim=True, unbiased=False)
+    return (w - m) / torch.sqrt(v + 1e-7)
 # ======================================================================
 
 
@@ -587,8 +596,14 @@ def run(
                     missing, unexpected = net_g.module.load_state_dict(ckpt, strict=False)
                 else:
                     missing, unexpected = net_g.load_state_dict(ckpt, strict=False)
+                bad_missing = [k for k in missing if not k.startswith("retrieval_v2.")]
+                if bad_missing or unexpected:
+                    raise RuntimeError(
+                        f"pretrained G load mismatch beyond the retrieval_v2 allowlist: "
+                        f"missing={bad_missing[:5]} unexpected={list(unexpected)[:5]}"
+                    )
                 if missing:
-                    print(f"pretrained G: {len(missing)} keys init fresh (e.g. {missing[:2]})")
+                    print(f"pretrained G: {len(missing)} retrieval_v2 keys init fresh")
                 del ckpt
             except Exception as e:
                 print(
@@ -908,8 +923,8 @@ def train_and_evaluate(
                         p16 = torchaudio.functional.resample(
                             wave.squeeze(1).float(), config.data.sample_rate, 16000
                         )
-                        tgt_lp = pm(p16).logits.log_softmax(-1)
-                    gen_lp = pm(y16.float()).logits.log_softmax(-1)
+                        tgt_lp = pm(_phon_znorm(p16)).logits.log_softmax(-1)
+                    gen_lp = pm(_phon_znorm(y16.float())).logits.log_softmax(-1)
                     T = min(tgt_lp.shape[1], gen_lp.shape[1])
                     tgt_lp, gen_lp = tgt_lp[:, :T], gen_lp[:, :T]
                     kl = F.kl_div(gen_lp, tgt_lp, log_target=True,
