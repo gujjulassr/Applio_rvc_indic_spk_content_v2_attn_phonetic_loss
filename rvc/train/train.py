@@ -19,8 +19,6 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-
-
 # ==================== VC-AUX: flags + lazy loaders ====================
 import torchaudio
 
@@ -43,6 +41,7 @@ def _get_memory(device):
     if _membank is None:
         import glob as _g
         import faiss
+
         p = sorted(_g.glob(os.path.join(experiment_dir, "*.index")))
         assert p, f"V2=1 needs a .index in {experiment_dir} (built from REAL features)"
         ix = faiss.read_index(p[0])
@@ -56,6 +55,7 @@ def _get_scl(device):
     global _scl_encoder, _scl_targets
     if _scl_encoder is None:
         from speechbrain.inference.speaker import EncoderClassifier
+
         _scl_encoder = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             run_opts={"device": str(device)},
@@ -74,11 +74,13 @@ def _get_content(device):
     global _cenc
     if _cenc is None:
         from rvc.lib.utils import load_embedding
+
         _cenc = load_embedding("contentvec", None).to(device).float().eval()
         for p in _cenc.parameters():
             p.requires_grad = False
         print("AUX: loaded contentvec for content loss", flush=True)
     return _cenc
+
 
 # --- (3) phonetic content loss (PCL): env-gated, off unless PHON_JUDGE set ---
 c_phon = float(os.environ.get("C_PHON", "2.0"))
@@ -92,17 +94,32 @@ def _get_phon(device):
     global _phon_model, _phon_frag_ids
     if _phon_model is None:
         from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+
         pdir = os.environ["PHON_JUDGE"]
         _phon_model = Wav2Vec2ForCTC.from_pretrained(pdir).to(device).float().eval()
         for p in _phon_model.parameters():
             p.requires_grad = False
         vocab = Wav2Vec2Processor.from_pretrained(pdir).tokenizer.get_vocab()
-        FRAGILE = ["\u093c", "\u0939", "\u0901", "\u0902",
-                   "\u092d", "\u092b", "\u0927", "\u0920",
-                   "\u0918", "\u091d", "\u0916", "\u091b"]
+        FRAGILE = [
+            "\u093c",
+            "\u0939",
+            "\u0901",
+            "\u0902",
+            "\u092d",
+            "\u092b",
+            "\u0927",
+            "\u0920",
+            "\u0918",
+            "\u091d",
+            "\u0916",
+            "\u091b",
+        ]
         _phon_frag_ids = [vocab[c] for c in FRAGILE if c in vocab]
-        print(f"[PCL] {pdir} | fragile ids {len(_phon_frag_ids)}/12 | "
-              f"c_phon={c_phon} lam_frag={lam_frag} every={phon_every}", flush=True)
+        print(
+            f"[PCL] {pdir} | fragile ids {len(_phon_frag_ids)}/12 | "
+            f"c_phon={c_phon} lam_frag={lam_frag} every={phon_every}",
+            flush=True,
+        )
     return _phon_model, _phon_frag_ids
 
 
@@ -113,8 +130,9 @@ def _phon_znorm(w):
     m = w.mean(dim=-1, keepdim=True)
     v = w.var(dim=-1, keepdim=True, unbiased=False)
     return (w - m) / torch.sqrt(v + 1e-7)
-# ======================================================================
 
+
+# ======================================================================
 
 
 now_dir = os.getcwd()
@@ -223,7 +241,7 @@ try:
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 except Exception as e:
-    print(f'Torch tf32: {e}')
+    print(f"Torch tf32: {e}")
 
 global_step = 0
 last_loss_gen_all = 0
@@ -526,15 +544,15 @@ def run(
         print("Using AdamW optimizer")
         optimizer = torch.optim.AdamW
 
-
     if GTA:
         for _n, _p in net_g.named_parameters():
             _p.requires_grad = (".dec." in _n) or _n.startswith("dec.")
         _tr = sum(p.requires_grad for p in net_g.parameters())
-        print(f"GTA: training {_tr}/{sum(1 for _ in net_g.parameters())} "
-              f"param tensors (decoder only)", flush=True)
-
-    
+        print(
+            f"GTA: training {_tr}/{sum(1 for _ in net_g.parameters())} "
+            f"param tensors (decoder only)",
+            flush=True,
+        )
 
     optim_g = optimizer(
         net_g.parameters(),
@@ -593,7 +611,9 @@ def run(
                 # (retrieval_v2.*) absent from stock pretrained -- those init
                 # fresh; everything else loads normally.
                 if hasattr(net_g, "module"):
-                    missing, unexpected = net_g.module.load_state_dict(ckpt, strict=False)
+                    missing, unexpected = net_g.module.load_state_dict(
+                        ckpt, strict=False
+                    )
                 else:
                     missing, unexpected = net_g.load_state_dict(ckpt, strict=False)
                 bad_missing = [k for k in missing if not k.startswith("retrieval_v2.")]
@@ -791,14 +811,21 @@ def train_and_evaluate(
                 device_type="cuda", enabled=use_amp, dtype=train_dtype
             ):
 
-
                 memory = None
                 if V2:
                     bank = _get_memory(phone.device)
                     memory = bank.unsqueeze(0).expand(phone.size(0), -1, -1)
                 # Forward pass
                 model_output = net_g(
-                    phone, phone_lengths, pitch, pitchf, spec, spec_lengths, sid, memory, gta=GTA
+                    phone,
+                    phone_lengths,
+                    pitch,
+                    pitchf,
+                    spec,
+                    spec_lengths,
+                    sid,
+                    memory,
+                    gta=GTA,
                 )
                 y_hat, ids_slice, x_mask, z_mask, (z, z_p, m_p, logs_p, m_q, logs_q) = (
                     model_output
@@ -863,9 +890,7 @@ def train_and_evaluate(
             loss_fm = feature_loss(fmap_r, fmap_g)
             loss_gen, _ = generator_loss(y_d_hat_g)
 
-
-
-             # ==================== VC-AUX losses ====================
+            # ==================== VC-AUX losses ====================
             device = y_hat.device
             y16 = torchaudio.functional.resample(
                 y_hat.squeeze(1).float(), config.data.sample_rate, 16000
@@ -876,9 +901,7 @@ def train_and_evaluate(
                 os.path.join(experiment_dir, "spk_targets.pt")
             ):
                 scl_enc, scl_targets = _get_scl(device)
-                pred_emb = F.normalize(
-                    scl_enc.encode_batch(y16).squeeze(1), dim=-1
-                )
+                pred_emb = F.normalize(scl_enc.encode_batch(y16).squeeze(1), dim=-1)
                 cents = F.normalize(scl_targets, dim=-1)
                 logits = (pred_emb @ cents.T) / tau_spk
                 assert int(sid.max()) < logits.shape[1], (
@@ -903,8 +926,10 @@ def train_and_evaluate(
                     tgt_cont = cenc(tgt16)["last_hidden_state"]
                 if tgt_cont.shape[1] != gen_cont.shape[1]:
                     tgt_cont = F.interpolate(
-                        tgt_cont.transpose(1, 2), size=gen_cont.shape[1],
-                        mode="linear", align_corners=False,
+                        tgt_cont.transpose(1, 2),
+                        size=gen_cont.shape[1],
+                        mode="linear",
+                        align_corners=False,
                     ).transpose(1, 2)
                 loss_content = (
                     1 - F.cosine_similarity(gen_cont, tgt_cont, dim=-1)
@@ -927,29 +952,40 @@ def train_and_evaluate(
                     gen_lp = pm(_phon_znorm(y16.float())).logits.log_softmax(-1)
                     T = min(tgt_lp.shape[1], gen_lp.shape[1])
                     tgt_lp, gen_lp = tgt_lp[:, :T], gen_lp[:, :T]
-                    kl = F.kl_div(gen_lp, tgt_lp, log_target=True,
-                                  reduction="none").sum(-1)
+                    kl = F.kl_div(
+                        gen_lp, tgt_lp, log_target=True, reduction="none"
+                    ).sum(-1)
                     w = 1.0 + lam_frag * tgt_lp.exp()[..., frag_ids].sum(-1)
                     loss_phon = (kl * w).sum() / w.sum() * c_phon
             else:
                 loss_phon = torch.tensor(0.0, device=device)
 
             if rank == 0 and global_step % 50 == 0:
-                print(f"  [aux] step {global_step} spk={float(loss_spk):.3f} "
-                      f"content={float(loss_content):.3f} "
-                      f"phon={float(loss_phon):.3f}", flush=True)
-
-
+                print(
+                    f"  [aux] step {global_step} spk={float(loss_spk):.3f} "
+                    f"content={float(loss_content):.3f} "
+                    f"phon={float(loss_phon):.3f}",
+                    flush=True,
+                )
 
             if V2 and rank == 0 and global_step % 50 == 0:
                 _m = net_g.module if hasattr(net_g, "module") else net_g
-                print(f"  [v2] gate={_m.retrieval_v2.last_gate:.4f} "
-                      f"null_share={_m.retrieval_v2.last_null_share:.1e}", flush=True)
+                print(
+                    f"  [v2] gate={_m.retrieval_v2.last_gate:.4f} "
+                    f"null_share={_m.retrieval_v2.last_null_share:.1e}",
+                    flush=True,
+                )
             # =======================================================
 
-
-
-            loss_gen_all = loss_gen + loss_fm + loss_mel + loss_kl + loss_spk + loss_content + loss_phon
+            loss_gen_all = (
+                loss_gen
+                + loss_fm
+                + loss_mel
+                + loss_kl
+                + loss_spk
+                + loss_content
+                + loss_phon
+            )
 
             if loss_gen_all < lowest_value["value"]:
                 lowest_value = {

@@ -42,8 +42,9 @@ for f in sorted(os.listdir(wav_dir)):
     if f.endswith(".wav"):
         by_sid[int(f.split("_")[0])].append(os.path.join(wav_dir, f))
 assert by_sid, f"no wavs in {wav_dir}"
-print("speakers found:", sorted(by_sid),
-      "| files:", sum(len(v) for v in by_sid.values()))
+print(
+    "speakers found:", sorted(by_sid), "| files:", sum(len(v) for v in by_sid.values())
+)
 
 targets = torch.zeros(max(by_sid) + 1, 192)
 for sid, files in sorted(by_sid.items()):
@@ -64,9 +65,13 @@ for sid, files in sorted(by_sid.items()):
     assert embs, f"sid {sid}: every clip failed to load -- refusing to save a zero row"
     v = torch.stack(embs).mean(0)
     targets[sid] = v / v.norm()
-    print(f"sid {sid}: averaged {len(embs)} clips, norm={float(targets[sid].norm()):.3f}")
+    print(
+        f"sid {sid}: averaged {len(embs)} clips, norm={float(targets[sid].norm()):.3f}"
+    )
 
 out = os.path.join(exp_dir, "spk_targets.pt")
 torch.save(targets, out)
-print(f"saved {out}  shape={tuple(targets.shape)}  "
-      f"norms={[round(float(x), 3) for x in targets.norm(dim=1)]}")
+print(
+    f"saved {out}  shape={tuple(targets.shape)}  "
+    f"norms={[round(float(x), 3) for x in targets.norm(dim=1)]}"
+)

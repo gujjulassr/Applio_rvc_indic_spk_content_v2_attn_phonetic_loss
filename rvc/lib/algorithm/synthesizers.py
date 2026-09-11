@@ -152,7 +152,6 @@ class Synthesizer(torch.nn.Module):
         )
         self.emb_g = torch.nn.Embedding(spk_embed_dim, gin_channels)
 
-
         self.retrieval_v2 = RetrievalAttentionV2(text_enc_hidden_dim)
 
     def _remove_weight_norm_from(self, module):
@@ -179,14 +178,11 @@ class Synthesizer(torch.nn.Module):
         ds: Optional[torch.Tensor] = None,
         memory: Optional[torch.Tensor] = None,
         gta: bool = False,
-
     ):
 
         if memory is not None:
             phone = self.retrieval_v2(phone, memory)
 
-
-        
         g = self.emb_g(ds).unsqueeze(-1)
         m_p, logs_p, x_mask = self.enc_p(phone, pitch, phone_lengths)
 
@@ -195,11 +191,9 @@ class Synthesizer(torch.nn.Module):
             z_p = self.flow(z, y_mask, g=g)
 
             dec_src = z
-            if gta:   # decoder trains on the latents it will see at inference
+            if gta:  # decoder trains on the latents it will see at inference
                 dec_src = self.flow(m_p, x_mask, g=g, reverse=True)
 
-
-            
             # regular old training method using random slices
             if self.randomized:
                 z_slice, ids_slice = rand_slice_segments(
@@ -262,7 +256,6 @@ class Synthesizer(torch.nn.Module):
         return o, x_mask, (z, z_p, m_p, logs_p)
 
 
-
 class RetrievalAttentionV2(torch.nn.Module):
     """Single-head retrieval attention over a bank of REAL target frames.
     NULL KEY: a learnable logit appended before softmax = a 'none of the
@@ -272,17 +265,17 @@ class RetrievalAttentionV2(torch.nn.Module):
 
     def __init__(self, dim: int = 768):
         super().__init__()
-        self.scale = dim ** -0.5
+        self.scale = dim**-0.5
         self.null_logit = torch.nn.Parameter(torch.zeros(1))
         self.gate = torch.nn.Parameter(torch.tensor(-4.0))
-        self.last_gate = 0.0          # telemetry
-        self.last_null_share = 0.0    # telemetry
+        self.last_gate = 0.0  # telemetry
+        self.last_null_share = 0.0  # telemetry
 
     def forward(self, x, memory):
         # x: [B, T, D] content frames; memory: [B, M, D] bank of real frames
-        logits = torch.matmul(x, memory.transpose(1, 2)) * self.scale   # [B,T,M]
+        logits = torch.matmul(x, memory.transpose(1, 2)) * self.scale  # [B,T,M]
         null = self.null_logit.expand(logits.shape[0], logits.shape[1], 1)
-        w = torch.softmax(torch.cat([logits, null], dim=-1), dim=-1)    # [B,T,M+1]
+        w = torch.softmax(torch.cat([logits, null], dim=-1), dim=-1)  # [B,T,M+1]
         retrieved = torch.matmul(w[..., :-1], memory)  # null share discarded
         a = torch.sigmoid(self.gate)
         self.last_gate = float(a)
